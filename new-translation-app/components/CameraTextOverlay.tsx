@@ -1,6 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { Camera, CameraType } from 'expo-camera';
+import { Camera, CameraType, FaceDetectionResult } from 'expo-camera';
 import * as FaceDetector from 'expo-face-detector';
 import Voice from '@react-native-voice/voice';
 
@@ -15,11 +15,23 @@ interface TextBubble {
 
 const CameraTextOverlay: React.FC = () => {
     const [hasPermission, setHasPermission] = useState<boolean | null>(null);
-    const [type, setType] = useState(CameraType.front);
+    const [type, setType] = useState<CameraType>(CameraType.front);
     const [faces, setFaces] = useState<FaceDetector.FaceFeature[]>([]);
     const [textBubbles, setTextBubbles] = useState<TextBubble[]>([]);
     const [isListening, setIsListening] = useState(false);
     const cameraRef = useRef<Camera | null>(null);
+
+    const speechResultsHandler = useCallback((e: any) => {
+        if (faces.length > 0 && e.value) {
+            const face = faces[0];
+            const newBubble: TextBubble = {
+                id: Date.now(),
+                text: e.value[0],
+                position: { x: face.bounds.origin.x, y: face.bounds.origin.y - 50 }
+            };
+            setTextBubbles(prevBubbles => [...prevBubbles, newBubble]);
+        }
+    }, [faces]);
 
     useEffect(() => {
         (async () => {
@@ -27,28 +39,20 @@ const CameraTextOverlay: React.FC = () => {
             setHasPermission(status === 'granted');
         })();
 
-        Voice.onSpeechResults = (e: any) => {
-            if (faces.length > 0 && e.value) {
-                const face = faces[0];
-                const newBubble: TextBubble = {
-                    id: Date.now(),
-                    text: e.value[0],
-                    position: { x: face.bounds.origin.x, y: face.bounds.origin.y - 50 }
-                };
-                setTextBubbles(prevBubbles => [...prevBubbles, newBubble]);
-            }
-        };
+        Voice.onSpeechResults = speechResultsHandler;
 
         return () => {
-            Voice.destroy().then(Voice.removeAllListeners);
+            Voice.destroy().then(() => {
+                Voice.removeAllListeners();
+            });
         };
-    }, [faces]);
+    }, [speechResultsHandler]);
 
-    const onFacesDetected = ({ faces }: any) => {
-        if (Array.isArray(faces) && faces.length > 0) {
-            setFaces(faces);
+    const onFacesDetected = useCallback((result: FaceDetectionResult) => {
+        if ((result as any).faces.length > 0) {
+            setFaces((result as any).faces);
         }
-    };
+    }, []);
 
     const startListening = async () => {
         try {
@@ -94,10 +98,8 @@ const CameraTextOverlay: React.FC = () => {
                     <TouchableOpacity
                         style={styles.button}
                         onPress={() => {
-                            setType(
-                                type === CameraType.back
-                                    ? CameraType.front
-                                    : CameraType.back
+                            setType(prevType =>
+                                prevType === CameraType.back ? CameraType.front : CameraType.back
                             );
                         }}>
                         <Text style={styles.text}>Flip Camera</Text>
